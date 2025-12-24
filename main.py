@@ -149,6 +149,21 @@ def get_live_location(config):
             
     return None
 
+def send_to_hq(url, data):
+    """Send detection data to HQ Server asynchronously."""
+    if not url:
+        return
+    
+    try:
+        # Append /api/ingest if not present
+        if not url.endswith('/api/ingest'):
+            url = url.rstrip('/') + '/api/ingest'
+            
+        requests.post(url, json=data, timeout=2)
+    except Exception as e:
+        # Log only warnings to avoid spamming console on network issues
+        logger.debug(f"Failed to send to HQ: {e}")
+
 def main():
     config = load_config()
     
@@ -319,6 +334,20 @@ def main():
                                       location=cam_conf.get('name', cid),
                                       gps=cam_conf.get('gps'),
                                       mesh=mesh_data)
+
+                            # Send to HQ (Async)
+                            hq_url = config.get('system', {}).get('central_server')
+                            if hq_url:
+                                payload = {
+                                    'name': name,
+                                    'score': float(score),
+                                    'timestamp': time.time(),
+                                    'location': cam_conf.get('name', cid),
+                                    'gps': cam_conf.get('gps'),
+                                    'device_id': config.get('system', {}).get('device_id', 'Unknown'),
+                                    'mesh': mesh_data
+                                }
+                                executor.submit(send_to_hq, hq_url, payload)
 
                         # Visualization
                         color = (0, 255, 0) if name != config['recognition']['unknown_label'] else (0, 0, 255)

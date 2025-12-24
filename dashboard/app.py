@@ -156,6 +156,37 @@ def generate():
 def index():
     return render_template("index.html")
 
+@app.route('/api/history/<name>')
+def get_history(name):
+    """Get movement history for a specific person."""
+    try:
+        track = []
+        if os.path.exists(HISTORY_FILE):
+            with open(HISTORY_FILE, 'r') as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line)
+                        if entry.get('name') == name:
+                            gps = entry.get('gps')
+                            if gps and isinstance(gps, dict) and 'lat' in gps and 'lng' in gps:
+                                if gps['lat'] != 0 or gps['lng'] != 0: # Include if either lat or lng is non-zero
+                                     track.append({
+                                         'lat': gps['lat'],
+                                         'lng': gps['lng'],
+                                         'timestamp': entry.get('timestamp')
+                                     })
+                    except json.JSONDecodeError:
+                        logger.warning(f"Skipping malformed JSON line in history file: {line.strip()}")
+                    except Exception as e:
+                        logger.error(f"Error processing history entry: {e}")
+        
+        # Sort by time
+        track.sort(key=lambda x: x['timestamp'])
+        return jsonify(track)
+    except Exception as e:
+        logger.error(f"Error in get_history for {name}: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/video_feed")
 def video_feed():
     return Response(generate(), mimetype="multipart/x-mixed-replace; boundary=frame")
