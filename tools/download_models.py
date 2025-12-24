@@ -37,6 +37,10 @@ def main():
         "hifill": {
             "url": "https://huggingface.co/ford442/deepfillv2-inpainting/resolve/main/onnx/hifill.onnx",
             "path": "models/inpainting/hifill.onnx"
+        },
+        "lama": {
+            "url": "https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx",
+            "path": "models/inpainting/lama.onnx"
         }
     }
     

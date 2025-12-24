@@ -46,7 +46,7 @@ recognition:
 # Inpainting
 inpainting:
   enabled: true
-  model_path: "models/inpainting/hifill.onnx" # Switched to HiFill for better compatibility
+  model_path: "models/inpainting/lama.onnx" # Switched to LaMa (Standard ONNX)
   mask_threshold: 0.5  # Threshold to decide if occlusion exists
 
 # Database
