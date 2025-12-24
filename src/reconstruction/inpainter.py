@@ -1,7 +1,13 @@
 import cv2
 import numpy as np
-import onnxruntime as ort
 import logging
+import onnxruntime as ort
+# Register custom ops (needed for DeepFillV2's ExtractImagePatches)
+try:
+    from onnxruntime_extensions import get_library_path
+except ImportError:
+    pass
+
 from typing import Tuple, Optional
 
 logger = logging.getLogger("Inpainter")
@@ -20,13 +26,24 @@ class FaceInpainter:
         self.session = None
         
         try:
+            # Prepare Session Options with Custom Ops
+            so = ort.SessionOptions()
+            try:
+                from onnxruntime_extensions import get_library_path
+                so.register_custom_ops_library(get_library_path())
+                logger.info("Registered ONNX Runtime Extensions.")
+            except ImportError:
+                logger.warning("onnxruntime-extensions not found. Some models may fail.")
+
             # Use CUDA if available, else CPU
             providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-            self.session = ort.InferenceSession(model_path, providers=providers)
+            self.session = ort.InferenceSession(model_path, sess_options=so, providers=providers)
             logger.info(f"Inpainting model loaded from {model_path}")
         except Exception as e:
-            logger.error(f"Failed to load inpainting model: {e}")
-            logger.warning("Inpainter will be disabled.")
+            logger.warning(f"AI Inpainting Model failed to load: {e}")
+            logger.info("Switched to OpenCV Inpainting Fallback (Telea).")
+            # We do NOT set self.session = None here because it is already None
+            # The reconstruct method handles None session by using the fallback.
 
     def detect_occlusion(self, face_chip: np.ndarray, landmarks: Optional[np.ndarray] = None) -> Tuple[bool, Optional[np.ndarray]]:
         """
@@ -98,7 +115,8 @@ class FaceInpainter:
             The reconstructed BGR face.
         """
         if self.session is None:
-            return face_chip
+            # Fallback to OpenCV Telea Inpainting if model failed to load
+            return self._inpaint_cv2(face_chip, mask)
 
         # Preprocess
         # DeepFill usually expects (1, 4, H, W) or (1, 3, H, W) + mask
@@ -109,23 +127,20 @@ class FaceInpainter:
         target_size = (256, 256)
         orig_h, orig_w = face_chip.shape[:2]
         
-        img_resized = cv2.resize(face_chip, target_size)
-        mask_resized = cv2.resize(mask, target_size, interpolation=cv2.INTER_NEAREST)
-        
-        # Normalize
-        img_t = (img_resized.astype(np.float32) / 127.5) - 1.0
-        mask_t = mask_resized.astype(np.float32)
-        mask_t = np.expand_dims(mask_t, axis=-1) # H,W,1
-        
-        # Concatenate for some models, or separate inputs?
-        # Standard ONNX export often takes 'image' and 'mask'
-        
-        # Prepare inputs
-        img_input = np.transpose(img_t, (2, 0, 1))[np.newaxis, ...] # 1,3,H,W
-        mask_input = np.transpose(mask_t, (2, 0, 1))[np.newaxis, ...] # 1,1,H,W
-        
-        # Run inference
         try:
+            img_resized = cv2.resize(face_chip, target_size)
+            mask_resized = cv2.resize(mask, target_size, interpolation=cv2.INTER_NEAREST)
+            
+            # Normalize
+            img_t = (img_resized.astype(np.float32) / 127.5) - 1.0
+            mask_t = mask_resized.astype(np.float32)
+            mask_t = np.expand_dims(mask_t, axis=-1) # H,W,1
+            
+            # Prepare inputs
+            img_input = np.transpose(img_t, (2, 0, 1))[np.newaxis, ...] # 1,3,H,W
+            mask_input = np.transpose(mask_t, (2, 0, 1))[np.newaxis, ...] # 1,1,H,W
+        
+            # Run inference
             # Check model input names
             input_name_img = self.session.get_inputs()[0].name
             input_name_mask = self.session.get_inputs()[1].name
@@ -147,5 +162,12 @@ class FaceInpainter:
             return result.astype(np.uint8)
             
         except Exception as e:
-            logger.error(f"Inference failed: {e}")
-            return face_chip
+            logger.warning(f"Inference failed ({e}). Falling back to OpenCV inpainting.")
+            return self._inpaint_cv2(face_chip, mask)
+
+    def _inpaint_cv2(self, img, mask):
+        """Standard OpenCV Inpainting (Telea/NS) as fallback."""
+        # mask needs to be 8-bit single channel
+        mask_8u = (mask * 255).astype(np.uint8)
+        # Radius 3, Telea algorithm
+        return cv2.inpaint(img, mask_8u, 3, cv2.INPAINT_TELEA)

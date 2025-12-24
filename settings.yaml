@@ -8,6 +8,10 @@ system:
 system:
   device_id: "HUB-01"
   central_server: "https://fsce-recog-surv-sys.onrender.com" # HQ Server URL (leave empty to disable)
+  gps_device:
+    enabled: true
+    port: "COM3" # standard Windows GPS port, linux would be /dev/ttyUSB0
+    baudrate: 9600
 
 # Cameras Configuration
 cameras:
@@ -41,8 +45,8 @@ recognition:
 
 # Inpainting
 inpainting:
-  enable: false
-  model_path: "models/inpainting/deepfillv2.onnx"
+  enabled: true
+  model_path: "models/inpainting/hifill.onnx" # Switched to HiFill for better compatibility
   mask_threshold: 0.5  # Threshold to decide if occlusion exists
 
 # Database

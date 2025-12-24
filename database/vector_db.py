@@ -150,7 +150,8 @@ class VectorDB:
             matches.append({
                 "id": winner['id'],
                 "name": best_name,
-                "score": final_score
+                "score": final_score,
+                "landmark_3d_68": winner.get('landmark_3d_68') # Return stored 3D mesh for comparison
             })
             
         return matches

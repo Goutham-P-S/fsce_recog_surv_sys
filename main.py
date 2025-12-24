@@ -38,9 +38,97 @@ def load_config(path: str = "settings.yaml") -> Dict:
 
 import requests
 import json
+import serial
+import pynmea2
 
-def get_live_location():
-    """Detect IP-based location with failover."""
+def get_physical_gps(config):
+    """Attempt to read from physical GPS sensor."""
+    gps_conf = config.get('system', {}).get('gps_device', {})
+    if not gps_conf.get('enabled', False):
+        return None
+        
+    port = gps_conf.get('port', 'COM3')
+    baud = gps_conf.get('baudrate', 9600)
+    
+    logger.info(f"Attempting to connect to GPS at {port}...")
+    try:
+        with serial.Serial(port, baud, timeout=2) as ser:
+            # Read a few lines to find a valid fix
+            for _ in range(20):
+                line = ser.readline().decode('utf-8', errors='ignore')
+                if line.startswith('$GPGGA') or line.startswith('$GPRMC'):
+                    msg = pynmea2.parse(line)
+                    if hasattr(msg, 'latitude') and msg.latitude != 0:
+                        logger.info(f"Physical GPS Fix: {msg.latitude}, {msg.longitude}")
+                        return {
+                            'lat': msg.latitude,
+                            'lng': msg.longitude,
+                            'city': 'GPS Fixed'
+                        }
+    except Exception as e:
+        logger.warning(f"Physical GPS failed: {e}")
+        
+    return None
+
+import asyncio
+
+async def get_windows_gps():
+    """Access Windows Location API via WinSDK."""
+    try:
+        from winsdk.windows.devices.geolocation import Geolocator, GeolocationAccessStatus
+        
+        # Request access explicitly
+        logger.info("Requesting Windows Location Access...")
+        status = await Geolocator.request_access_async()
+        
+        if status == GeolocationAccessStatus.ALLOWED:
+            logger.info("Access Granted. Acquiring signal...")
+            locator = Geolocator()
+            locator.desired_accuracy_in_meters = 10
+            
+            # Timeout after 5 seconds
+            timeout = 5000 
+            # In UWP, getting position is simpler, but in python winsdk proper async await is needed
+            # We use a lambda to map the timeout/optimization
+            pos = await locator.get_geoposition_async()
+            
+            lat = pos.coordinate.point.position.latitude
+            lng = pos.coordinate.point.position.longitude
+            logger.info(f"Windows GPS Fix: {lat}, {lng}")
+            return {'lat': lat, 'lng': lng, 'city': 'Windows GPS'}
+            
+        elif status == GeolocationAccessStatus.DENIED:
+            logger.warning("Windows Location Access DENIED.")
+            logger.warning("ACTION REQUIRED: Go to Settings > Privacy > Location and turn on 'Allow desktop apps to access your location'.")
+            
+        else:
+            logger.warning(f"Windows Location Access Status: {status}")
+            
+    except ImportError:
+        logger.warning("winsdk not installed. Skipping Windows GPS.")
+    except Exception as e:
+        logger.warning(f"Windows GPS Error: {e}")
+        
+    return None
+
+def get_live_location(config):
+    """Detect location with Physical GPS -> Windows GPS -> IP Failover."""
+    
+    # 1. Try Physical Serial GPS
+    gps = get_physical_gps(config)
+    if gps:
+        return gps
+        
+    # 2. Try Windows Inbuilt GPS
+    try:
+        # Run async function synchronously
+        gps = asyncio.run(get_windows_gps())
+        if gps:
+            return gps
+    except Exception as e:
+        logger.warning(f"Async execution failed: {e}")
+
+    # 3. IP-based Fallback
     providers = [
         ("http://ip-api.com/json", lambda d: (d['lat'], d['lon'], d.get('city', 'Unknown'))),
         ("https://ipinfo.io/json", lambda d: (float(d['loc'].split(',')[0]), float(d['loc'].split(',')[1]), d.get('city', 'Unknown'))),
@@ -66,7 +154,7 @@ def main():
     
     # 0. Auto-Detect Location (if enabled or default)
     # Ideally we'd have a config flag, but user requested "automatically detect"
-    detected_gps = get_live_location()
+    detected_gps = get_live_location(config)
     
     if detected_gps:
         # Update system-wide GPS
@@ -221,10 +309,16 @@ def main():
                                 score = matches[0]['score']
                                 local_identities[track_id] = {'name': name, 'score': score}
                                 
+                            # Extract 3D Mesh for forensics (if available)
+                            mesh_data = None
+                            if hasattr(matched_face, 'landmark_3d_68') and matched_face.landmark_3d_68 is not None:
+                                mesh_data = matched_face.landmark_3d_68.tolist()
+
                             # Log (with location info!)
                             update_logs(name, score, 
                                       location=cam_conf.get('name', cid),
-                                      gps=cam_conf.get('gps'))
+                                      gps=cam_conf.get('gps'),
+                                      mesh=mesh_data)
 
                         # Visualization
                         color = (0, 255, 0) if name != config['recognition']['unknown_label'] else (0, 0, 255)
