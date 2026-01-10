@@ -362,7 +362,7 @@ def main():
 
                             # Forensics Capture (Run once per track if recognized)
                             capture_paths = {}
-                            if name != config['recognition']['unknown_label'] and 'forensics_saved' not in local_identities[track_id]:
+                            if 'forensics_saved' not in local_identities[track_id]:
                                 try:
                                     # Ensure directory exists (in case it wasn't there)
                                     captures_dir = os.path.join("dashboard", "static", "captures")
@@ -412,11 +412,22 @@ def main():
                                         capture_paths['mesh_img'] = f"static/captures/{mesh_name}"
 
                                         # Save as .obj for 3D Viewers
-                                        if mesh_data_468:
+                                        # Buffer for OBJ points
+                                        obj_points = mesh_data_468
+                                        
+                                        # Fallback to 68 points if 468 missing
+                                        if not obj_points and hasattr(matched_face, 'landmark_3d_68') and matched_face.landmark_3d_68 is not None:
+                                             # Convert 68 points relative to crop
+                                             lmks_obj = matched_face.landmark_3d_68.copy()
+                                             lmks_obj[:, 0] -= bbox[0]
+                                             lmks_obj[:, 1] -= bbox[1]
+                                             obj_points = lmks_obj.tolist()
+                                        
+                                        if obj_points:
                                             obj_name = f"{ts_str}_mesh.obj"
                                             with open(os.path.join(captures_dir, obj_name), 'w') as f:
-                                                f.write(f"# Face Mesh 468 points - {name}\n")
-                                                for v in mesh_data_468:
+                                                f.write(f"# Face Mesh {len(obj_points)} points - {name}\n")
+                                                for v in obj_points:
                                                     # Invert Y for standard 3D viewers (Height - Y)
                                                     f.write(f"v {v[0]:.4f} {face_crop.shape[0] - v[1]:.4f} {v[2]:.4f}\n")
                                             capture_paths['mesh_obj'] = f"static/captures/{obj_name}"
@@ -476,21 +487,21 @@ def main():
                                           captures=capture_paths)
                                 local_identities[track_id]['last_log'] = time.time()
 
-                            # Send to HQ (Async)
-                            hq_url = config.get('system', {}).get('central_server')
-                            if hq_url:
-                                payload = {
-                                    'name': name,
-                                    'score': float(score),
-                                    'timestamp': time.time(),
-                                    'location': cam_conf.get('name', cid),
-                                    'gps': cam_conf.get('gps'),
-                                    'device_id': config.get('system', {}).get('device_id', 'Unknown'),
-                                    'mesh': mesh_data,
-                                    'mesh_468': mesh_data_468 if 'mesh_data_468' in locals() else None,
-                                    'captures': capture_paths
-                                }
-                                executor.submit(send_to_hq, hq_url, payload)
+                                # Send to HQ (Async) based on throttle
+                                hq_url = config.get('system', {}).get('central_server')
+                                if hq_url:
+                                    payload = {
+                                        'name': name,
+                                        'score': float(score),
+                                        'timestamp': time.time(),
+                                        'location': cam_conf.get('name', cid),
+                                        'gps': cam_conf.get('gps'),
+                                        'device_id': config.get('system', {}).get('device_id', 'Unknown'),
+                                        'mesh': mesh_data,
+                                        'mesh_468': mesh_data_468 if 'mesh_data_468' in locals() else None,
+                                        'captures': capture_paths
+                                    }
+                                    executor.submit(send_to_hq, hq_url, payload)
 
                         # Visualization
                         color = (0, 255, 0) if name != config['recognition']['unknown_label'] else (0, 0, 255)
