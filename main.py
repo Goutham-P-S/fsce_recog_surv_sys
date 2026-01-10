@@ -362,7 +362,7 @@ def main():
 
                             # Forensics Capture (Run once per track if recognized)
                             capture_paths = {}
-                            if 'forensics_saved' not in local_identities[track_id] and name != config['recognition']['unknown_label']:
+                            if name != config['recognition']['unknown_label'] and 'forensics_saved' not in local_identities[track_id]:
                                 try:
                                     # Ensure directory exists (in case it wasn't there)
                                     captures_dir = os.path.join("dashboard", "static", "captures")
@@ -410,6 +410,16 @@ def main():
                                         mesh_name = f"{ts_str}_mesh.jpg"
                                         cv2.imwrite(os.path.join(captures_dir, mesh_name), mesh_viz)
                                         capture_paths['mesh_img'] = f"static/captures/{mesh_name}"
+
+                                        # Save as .obj for 3D Viewers
+                                        if mesh_data_468:
+                                            obj_name = f"{ts_str}_mesh.obj"
+                                            with open(os.path.join(captures_dir, obj_name), 'w') as f:
+                                                f.write(f"# Face Mesh 468 points - {name}\n")
+                                                for v in mesh_data_468:
+                                                    # Invert Y for standard 3D viewers (Height - Y)
+                                                    f.write(f"v {v[0]:.4f} {face_crop.shape[0] - v[1]:.4f} {v[2]:.4f}\n")
+                                            capture_paths['mesh_obj'] = f"static/captures/{obj_name}"
                                         
                                         # 3. Enrolled/Reference Mesh (The "Original")
                                         # matches[0] contains the DB record data we retrieved
@@ -444,18 +454,27 @@ def main():
                                                 cv2.imwrite(os.path.join(captures_dir, ref_name), ref_viz)
                                                 capture_paths['ref_mesh'] = f"static/captures/{ref_name}"
 
+                                        # Store in identity state so we can attach to future logs
+                                        local_identities[track_id]['captures'] = capture_paths
                                         local_identities[track_id]['forensics_saved'] = True
                                         logger.info(f"Saved forensics for {name}")
 
                                 except Exception as e:
                                     logger.error(f"Forensics capture failed: {e}")
+                            
+                            # If we didn't capture this frame, but have cached captures, use them
+                            if not capture_paths and track_id in local_identities and 'captures' in local_identities[track_id]:
+                                capture_paths = local_identities[track_id]['captures']
 
-                            # Log (with location info!)
-                            update_logs(name, score, 
-                                      location=cam_conf.get('name', cid),
-                                      gps=cam_conf.get('gps'),
-                                      mesh=mesh_data,
-                                      captures=capture_paths)
+                            # Log (Throttled: Max once every 10 seconds per person)
+                            last_log = local_identities[track_id].get('last_log', 0)
+                            if time.time() - last_log > 10.0:
+                                update_logs(name, score, 
+                                          location=cam_conf.get('name', cid),
+                                          gps=cam_conf.get('gps'),
+                                          mesh=mesh_data,
+                                          captures=capture_paths)
+                                local_identities[track_id]['last_log'] = time.time()
 
                             # Send to HQ (Async)
                             hq_url = config.get('system', {}).get('central_server')

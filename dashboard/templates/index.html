@@ -359,6 +359,8 @@
                                 `<a href="/${log.captures.mesh_img}" target="_blank" style="text-decoration:none; background:#334155; padding:2px 5px; border-radius:3px; font-size:0.7em; color:cyan;">Mesh</a>` : ''}
                                     ${log.captures && log.captures.ref_mesh ?
                                 `<a href="/${log.captures.ref_mesh}" target="_blank" style="text-decoration:none; background:#334155; padding:2px 5px; border-radius:3px; font-size:0.7em; color:#4ade80;">Ref</a>` : ''}
+                                    ${log.captures && log.captures.mesh_obj ?
+                                `<a href="/${log.captures.mesh_obj}" target="_blank" style="text-decoration:none; background:#334155; padding:2px 5px; border-radius:3px; font-size:0.7em; color:orange;">OBJ</a>` : ''}
                                     <span class="log-score">${(log.score * 100).toFixed(1)}%</span>
                                 </div>
                             </div>
